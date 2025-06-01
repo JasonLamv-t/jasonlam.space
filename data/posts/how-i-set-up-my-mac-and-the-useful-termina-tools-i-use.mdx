@@ -1,0 +1,87 @@
+---
+title: How I set-up my Mac and the useful terminal tools I use
+date: '2023-12-16'
+tags: [tools, terminal, mac]
+summary: 作为开发人员，尽管我们已经有了现代的 IDE 和系统 UI 界面，但是终端和命令行仍然是我们在日常中最熟悉的计算机交互手段，在这里我列举我在自己的 Mac 中实际用到的一些配置和包。
+---
+
+作为开发人员，尽管我们已经有了现代的 IDE 和系统 UI 界面，但是终端和命令行仍然是我们在日常中最熟悉的计算机交互手段，在这里我列举我在自己的 Mac 中实际用到的一些配置和包。
+
+### [Homebrew](https://brew.sh/)
+
+Homebrew 或者说 brew 是 Mac 上最具盛名的包管理工具，目前在 GitHub 上已经有 35k Star。通过以下命令你可以快速安装：
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+### [oh-my-zsh](https://ohmyz.sh/)
+
+目前 Mac 已经默认自带了 zsh，通过 oh-my-zsh，我们可以通过使用不同的「[主题](https://github.com/ohmyzsh/ohmyzsh/wiki/Themes)」得到更好的命令行界面，并用上各种 [oh-my-zsh 插件](https://github.com/ohmyzsh/ohmyzsh/wiki/Plugins-Overview)来提高我们的工作效率。我使用的是默认的主题「robbyrussell」，使用的插件如下：
+
+- [git](https://github.com/ohmyzsh/ohmyzsh/tree/master/plugins/git)：提供了额外的 git 命令缩写和脚本
+- [gitignore](https://github.com/ohmyzsh/ohmyzsh/tree/master/plugins/gitignore)：通过请求 gitignore 快速生成对应的 gitignore 内容
+- [z](https://github.com/ohmyzsh/ohmyzsh/tree/master/plugins/z) / [autojump](https://github.com/ohmyzsh/ohmyzsh/tree/master/plugins/autojump)：快速跳转路径，两者选一即可
+- [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting/)：语法高亮
+- [zsh-autosuggestions](https://github.com/zsh-users/zsh-autosuggestions)：命令提示和补全
+
+```bash
+# Install oh-my-zsh
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+
+# Install zsh-autosuggestions
+git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
+
+# Install zsh-syntax-highlighting
+git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
+
+# Add the plugins to your.zshrc file
+...
+plugins=(git gitignore z zsh-syntax-highlighting zsh-autosuggestions)
+...
+```
+
+### 开发工具
+
+- [VSCode]: 无敌；`brew install visual-studio-code`
+- [Warp](https://www.warp.dev/)：一个好用又好看的终端。通过 `brew install --cask warp` 进行安装。
+- [~~iTerm2~~](https://iterm2.com/)：一个传统的 Mac 终端的替代品，可以提供更多的功能和配置。
+- [OrbStack](https://orbstack.dev/): 我感觉挺好用的，是 Docker 的 GUI 层，而且默认挂载了存储什么的。`brew install orbstack`。
+- Navicat Permium: DDDD
+- RedisInsight: `brew install redisinsight`
+- [Proxyman](https://proxyman.io/): 代理抓包工具
+- [Cody](https://about.sourcegraph.com/cody)
+- [SwitchHost]: host 管理工具，`brew install switchhosts`
+
+## 命令行工具
+
+以下包基本都可以通过 brew 安装
+
+- tldr：显示 tldr-pages 项目中命令行工具的简单帮助页面，提供命令行的常用例子和提示，比如`tldr tldr`
+- nvm：安装、卸载或切换 Node.js 版本
+- pnpm：没想到把，我可以用 brew 安装
+- pyenv：用于管理和切换 python 虚拟环境
+- bat：更好的 cat，有语法高亮和 Git 集成
+- htop：更好的 top，命令行资源监控工具
+- macos-trash：用移动到废纸篓替代 rm
+- gh：GitHub 官方命令行工具
+
+## 其他软件
+
+- [~~PD-Runner~~](https://github.com/lihaoyun6/PD-Runner)：Parallel Desktop 启动器
+- [Mos](https://github.com/Caldis/Mos)：macOS 上平滑鼠标滚动的工具
+- [Bob](https://github.com/ripperhe/Bob)：翻译插件，支持 OCR 等多种功能和多个平台
+- [BetterDisplay](https://github.com/waydabber/BetterDisplay)：更好的显示器管理工具，可以设置显示器的亮度和音量、分辨率等；brew 可以安装
+- [~~MonitorControl~~](https://github.com/MonitorControl/MonitorControl)：支持通过快捷键控制第三方外置显示器的亮度和音量，我已经换成上面那个家伙了，不过这个也够用了
+- [noTunes](https://github.com/tombonez/noTunes)：完美屏蔽 iTunes，在没有打开任何音乐软件的情况下按播放键可以打开指定的软件
+- [iShot](https://apps.apple.com/cn/app/ishot-%E4%BC%98%E7%A7%80%E7%9A%84%E6%88%AA%E5%9B%BE%E8%B4%B4%E5%9B%BE%E5%BD%95%E5%B1%8F%E5%BD%95%E9%9F%B3ocr%E7%BF%BB%E8%AF%91%E5%8F%96%E8%89%B2%E6%A0%87%E6%B3%A8%E5%B7%A5%E5%85%B7/id1485844094?mt=12): 截图工具
+- [~~jietu~~](https://jietu.qq.com/): 多显示器截图容易出问题，所以换成上面那个了，单显示器的话这个还不错
+- [Typora]: Markdown 编辑器
+- [uPic]: 图片管理，可以配合 Typora 自动上传图片
+- [ClashXPro]: 谁不喜欢在 Mac 上养只猫呢
+- Motrix: 下载工具
+- Infuse: 媒体库查看和管理
+- Spacedrive: 多存储的管理，替代 finder，还没完成开发
+- Maccy: 剪贴板管理
+- SideNote: 侧边栏笔记
+- Bartender: 菜单栏管理

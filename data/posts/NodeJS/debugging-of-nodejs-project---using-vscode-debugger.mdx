@@ -1,0 +1,125 @@
+---
+title: Debugging of NodeJS project - using VScode debugger with PM2
+date: '2023-04-24'
+summary: '最近接手了一个基于 express+ejs 的 NodeJS 项目，需要快速运行并进行调试，也因此对 PM2 以及 VSCode 对 NodeJS 有所了解，仅以本文记录'
+tags:
+  - NodeJS
+  - Debug
+  - VSCode Debugger
+  - PM2
+---
+
+首先简单介绍一下这个项目的结构。这个项目比较老，是基于 express+ejs 的，主要的页面通过 express+ejs 引擎渲染 HTML 模版并 host 跟页面交互有关的 controller。而还有十几个不同的 express app 实例来分别负责不同的模块的接口部分。整个项目历尽的周期比较长，经过了比较多人的接手维护，业务量跟代码量巨大，整个项目结构基本丧失了标准规范，开发规范扭曲走形（我相信这是老旧项目在没有提前设计情况下难以避免的问题）同时基本上没有任何文档，也没有任何人进行交接，因此遇到了种种问题，本文仅就如何使用 PM2 将这样的复杂项目启动并通过 VSCode 进行调试进行讨论。
+
+## 像摇把子一样原始的启动方式
+
+对于 NodeJS 的项目，启动方式一般都是 `node someapp.js`；至于 express 项目，则一般是 `node ./bin/www` 或者 `node app.js`。但这是一般项目的启动方式，而对于我接手的这种体量的项目来说，项目本身是由多个后端耦合组成，当然可以通过手动开多个终端并一个个启动的方式来进行开发，但是这样的操作未免也太 low 了吧。而且我还希望能够自定义一些启动参数，或者实现文件变动监听热重载，因此，PM2 映入我的眼帘。
+
+## PM2
+
+PM2 是一个 Node.js 应用程序的进程管理器，它可以让你轻松管理你的 Node.js 应用程序，包括启动，停止，重启，查看日志和监控等。它可以自动管理应用程序的多个进程，以提高应用程序的稳定性和可靠性。PM2 还提供了一些实用功能，例如自动重启应用程序，日志轮换和监控等。它可以轻松地与其他工具和服务集成，例如 Nginx，Docker 等。
+
+### PM2 的基本用法
+
+与 docker 的用法非常类似，只是 container 变成了 application，images 变成了 node 代码。通过 `npm/yarn/pnpm` 全局安装后，基本的命令如下：
+
+```bash
+pm2 start app_name
+pm2 restart app_name
+pm2 reload app_name
+pm2 stop app_name
+pm2 delete app_name
+pm2 ls	# 列出所有应用，像 `docker ps`
+pm2 monit	# 终端实时监控面板，个人感觉不是非常好用，主要是 log 的显示和刷新问题
+pm2 logs [app_name]	# 打印 pm2 或者对应应用的日志
+```
+
+更多的常用命令可以参看 [PM2 Quick Start](https://github.com/pm2-hive/pm2-hive.github.io/blob/master/docs/features/quick-start.md#cheatsheet)[^1]。
+
+### Ecosystem
+
+在 PM2 中，Ecosystem 是指一个名为 ecosystem.config.js 的文件，它是一个 JSON 格式的文件，用于配置和管理应用程序。通过 ecosystem.config.js 文件，你可以定义多个应用程序，并为每个应用程序指定独立的配置信息，例如应用程序的名称，运行脚本，环境变量，日志文件路径，进程数量等等。接下来我们来试一下。
+
+1. 初始化 ecosystem.config.js：`pm2 ecosystem`。
+
+2. 修改配置文件
+
+   ```js:ecosystem.config.js
+   module.exports = {
+     apps : [{
+       name   : "app1",
+       script : "./app.js",
+       cwd: './src',
+       watch: true, # 或者是路径列表，[path_to_watch, another_path, ...]
+       ignore_watch: ['node_modules', 'logs'],
+       node_args: ['--inspect', '--inspect-port=7000'],	// 这里是为了下一节的 VSCode 调试
+       env: {
+        NODE_ENV: 'development',
+       }
+     }]
+   }
+   ```
+
+3. 基本命令
+
+   ```bash
+   # Start all applications
+   pm2 start ecosystem.config.js
+
+   # Stop all
+   pm2 stop ecosystem.config.js
+
+   # Restart all
+   pm2 restart ecosystem.config.js
+
+   # Reload all
+   pm2 reload ecosystem.config.js
+
+   # Delete all
+   pm2 delete ecosystem.config.js
+   ```
+
+## VSCode 调试
+
+VSCode 内置的调试器还是非常好用的，可以调试各种程序，尤其是我经常在 VSCode 写 JS/TS 和 Python，当然也有很多前端的项目喜欢用 VSCode 写项目，VSCode 的调试器现在也可以调试浏览器了！当然，这不是本文涉及的内容。接下来我们将讲一下如何在 VSCode 调试 NodeJS 项目（当然其他语言也是大差不差的）。
+
+### 创建配置文件
+
+通过点击左侧调试插件 -> 创建 `launch.json` 来生成配置文件，并进行修改：
+
+```json:launch.json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "direct-launch-nodeapp",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/app.js",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "outputCapture": "std"
+    },
+    {
+      "name": "attach-running-nodeapp",
+      "type": "node",
+      "request": "attach",
+      "restart": true,
+      "port": 7000
+    },
+  ]
+}
+```
+
+在这里，我们定义了两个配置文件，保存后我们就可以在调试插件面板看到这两个调试应用了。
+
+### 通过 launch 的方式启动调试
+
+这种方式其实就是直接通过调试器启动对应的 app，配置可以参考前面的配置文件中的 `direct-launch-nodeapp` 部分，在启动后我们就可以直接打断点来调试我们的程序啦。对于单个 app 的开发来说，这种方式是比较友好的。对于单个文件的 NodeJS 的调试，还可以在 VSCode 的设置里开启 `auto attach node` 的方式来让 VSCode 能自动附加到已经启动的 Node 进程中，或者在 VSCode 的终端中通过 `npm start` 等命令运行时能自动 attach。对于 attach 的方式，接下来我们将细聊。
+
+### 通过 attach 的方式将调试器附加到已经启动的进程上
+
+attach 的调试方式其实是 NodeJS 支持的，通过指定 node 的参数 `--inspcet` 来开启调试。对于已经启动的 node 进程，可以通过发送 `SIGUSR1` 信号的方式来开启。在上一节 PM2 的配置中，我们指定了 7000 端口作为调试端口，因此在 VSCode 的调试配置中，也要设置相对应的接口来接入调试。
+
+[^1]: [PM2 - Quick Start (keymetrics.io)](https://pm2.keymetrics.io/docs/usage/quick-start/)
