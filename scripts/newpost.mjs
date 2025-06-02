@@ -4,7 +4,7 @@ import matter from 'gray-matter';
 import inquirer from 'inquirer';
 import path from 'path';
 
-const blogsRootPath = path.resolve('data', 'blogs');
+const blogsRootPath = path.resolve('data', 'posts');
 const checkBlogsRootPath = (source = '') => {
   const dir = path.resolve(blogsRootPath, source);
   if (!fs.existsSync(dir)) fs.mkdirSync(path.resolve(dir), { recursive: true });
