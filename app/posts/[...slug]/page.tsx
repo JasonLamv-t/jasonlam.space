@@ -1,5 +1,6 @@
 import { siteMeta } from '#/config';
 import MDX from '@/components/MDX';
+import { BlogPostJsonLd } from '@/components/JsonLd';
 import { getAuthor } from '@/libs/author';
 import { allPosts } from 'contentlayer/generated';
 import { format, parseISO } from 'date-fns';
@@ -38,9 +39,12 @@ const PostLayout = ({ params }: { params: { slug: string[] } }) => {
     (post) => post.url === decodeURI('posts/' + params.slug.join('/'))
   );
   if (!post) throw new Error(`Post not found for slug: ${params.slug}`);
+  
+  const fullUrl = `${siteMeta.url}/${post.url}`;
 
   return (
     <div className="md:px-8">
+      <BlogPostJsonLd post={post} url={fullUrl} />
       <article className="prose max-w-none dark:prose-invert">
         <header className="flex flex-col">
           <h1>{post.title}</h1>

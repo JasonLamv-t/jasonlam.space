@@ -3,7 +3,5 @@ User-agent: *
 Allow: /
 
 # Host
-Host: https://jasonlam.cc
+Host: https://jasonlam.space
 
-# Sitemaps
-Sitemap: https://jasonlam.cc/sitemap.xml
