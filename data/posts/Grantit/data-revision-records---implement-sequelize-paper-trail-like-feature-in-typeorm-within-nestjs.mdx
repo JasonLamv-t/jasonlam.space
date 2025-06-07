@@ -1,0 +1,480 @@
+---
+title: >-
+  Data revision records - implement sequelize-paper-trail like feature in
+  TypeORM within nest.js
+date: '2025-02-03'
+summary: >-
+  We have a feather.js project, using sequelize as ORM, ans using sequelize-paper-trail,a sequelize plugin to add revision records into database.
+  Because of that we are migrating to nest.js, we need to implement the same feature in nest.js, with TypeORM.
+draft: false
+pinned: true
+tags: []
+canonicalUrl: ''
+---
+
+Currently, we have a [feather.js](https://feathersjs.com/) project, using sequelize as ORM, ans using [sequelize-paper-trail](https://github.com/nielsgl/sequelize-paper-trail),a sequelize plugin to add revision records into database.
+
+For now's implement, there are two tables for revision records: `actions` and `revisions`.
+And due to that we have some business logic rely on those two tables, so we need to implement the same feature in nest.js, with TypeORM, and keep using those two tables,
+and reimplement the feature and logic as same as possible.
+
+Let's go dive into it.
+
+## 1. Original feature
+
+First, not all the tables was used this paper-trail feature. For those tables which use this feature, will have a `revision` column with initial `1` value when a new recode was created.
+
+Then, every operation which create, update or delete the records in those tables used this feature, will create an action record, with identified operator’s `userId` or `adminId` and the preset action name, e.g. `createRequest` .
+
+```sql
+CREATE TABLE "public"."actions" (
+    "id" int4 NOT NULL DEFAULT nextval('actions_id_seq'::regclass),
+    "action" varchar NOT NULL,
+    "userId" int4,
+    "adminId" int4,
+    "createdAt" timestamptz NOT NULL,
+    "updatedAt" timestamptz NOT NULL,
+    CONSTRAINT "actions_adminId_fkey" FOREIGN KEY ("adminId") REFERENCES "public"."admins"("id") ON UPDATE CASCADE,
+    CONSTRAINT "actions_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."users"("id") ON UPDATE CASCADE,
+    PRIMARY KEY ("id")
+);
+```
+
+Correspondingly, will create a revision records, recording the table’s name, rowId, revision count and the changes of the data.
+
+```sql
+CREATE TABLE "public"."revisions" (
+    "id" int4 NOT NULL DEFAULT nextval('revisions_id_seq'::regclass),
+    "model" text NOT NULL,
+    "document" jsonb NOT NULL,
+    "operation" varchar,
+    "documentId" int4 NOT NULL,
+    "revision" int4 NOT NULL,
+    "createdAt" timestamptz NOT NULL,
+    "updatedAt" timestamptz NOT NULL,
+    "modifiedByUserId" int4,
+    "modifiedByAdminId" int4,
+    "actionId" int4,
+    CONSTRAINT "revisions_actionId_fkey" FOREIGN KEY ("actionId") REFERENCES "public"."actions"("id") ON UPDATE CASCADE,
+    CONSTRAINT "revisions_modifiedByAdminId_fkey" FOREIGN KEY ("modifiedByAdminId") REFERENCES "public"."admins"("id") ON UPDATE CASCADE,
+    CONSTRAINT "revisions_modifiedByUserId_fkey" FOREIGN KEY ("modifiedByUserId") REFERENCES "public"."users"("id") ON UPDATE CASCADE,
+    PRIMARY KEY ("id")
+);
+```
+
+## 2. Re-Implement design
+
+I use TypeORM provided entity event subscriber to watch the need track revision record’s creation or change, then log the info in to the action table and the revision table.
+
+Of corse, some APIs will frequently modify revision entities, but these change are not important to our system, so it’s better to ignore these noice. So we can implement a decorator that use to decorate the API with to make this happen.
+
+That is what we have to do:
+
+1. Register the `Action` and the `Revision` entity, `RevisionContextInterceptor` , and the `RevisionSubscriber` in the `common.module` .
+2. `RevisionSubscriber`
+
+   Before the insertion and updating, will plus one to the revision field, which is a counting indicator, in the original record;
+
+   After the insert and the update event, will generate formatted action and revision record and save to the DB.
+
+3. `RevisionContextInterceptor`
+
+   Because we can not got the request context in the subscriber, but we need the request path and method to as the `action` identifier. So in this interceptor we catch the value we need then save and shared it to the subscriber via the `cls-hooked` pack.
+
+   > In the old server project, the `action` name is predefined, in our system now it is made of the request method and the path, due to our system is REST-full style. So the name will be a little bit diff between two sys, even the API is the same operation.
+
+## 3. Coding part
+
+### 3.1 Prerequisites
+
+We can define some class for convenience for entity definition.
+
+There is four classes:
+
+- `BaseEntity` : provide `id`, `createdAt`, and `updatedAt`
+- `RevisionEntity` : provide `revision`
+- `SoftDeleteEntity` : provide `deletedAt`
+- `RevisionSoftDeleteEntity` : combined `RevisionEntity` & `SoftDeleteEntity`
+
+That’s because in our system some tables are enable soft delete feature and some are not.
+
+- And here is the definition:
+  ```tsx
+  import {
+    Column,
+    CreateDateColumn,
+    DeleteDateColumn,
+    PrimaryGeneratedColumn,
+    UpdateDateColumn,
+  } from 'typeorm';
+
+  export interface IBaseEntity {
+    id: number;
+    createdAt: Date;
+    updatedAt: Date;
+  }
+
+  export interface IRevisionEntity extends IBaseEntity {
+    revision: number | null;
+  }
+
+  export interface ISoftDeleteEntity extends IBaseEntity {
+    deletedAt: Date | null;
+  }
+
+  /**
+   * Basic entity with auto increased `id` column, `createdAt` and `updatedAt` columns
+   */
+  export class BaseEntity implements IBaseEntity {
+    @PrimaryGeneratedColumn()
+    readonly id: number;
+
+    @CreateDateColumn({ default: new Date() })
+    readonly createdAt: Date = new Date();
+
+    @UpdateDateColumn({ default: new Date() })
+    readonly updatedAt: Date = new Date();
+  }
+
+  /**
+   * BaseEntity with additional `revision` column
+   */
+  export class RevisionEntity extends BaseEntity implements IRevisionEntity {
+    @Column({ type: 'int4', nullable: true, default: 0 })
+    revision: number | null = 0;
+  }
+
+  /** BaseEntity with additional `deletedAt` column */
+  export class SoftDeleteEntity
+    extends BaseEntity
+    implements ISoftDeleteEntity
+  {
+    @DeleteDateColumn({ default: null })
+    readonly deletedAt: Date | null = null;
+  }
+
+  /** BaseEntity with additional `revision` and `deletedAt` columns */
+  export class RevisionSoftDeleteEntity
+    // No extends from BaseEntity, because for revision-subscriber it only allow listen to one entity
+    extends RevisionEntity
+    implements IRevisionEntity, ISoftDeleteEntity
+  {
+    @Column({ type: 'int4', nullable: true, default: 0 })
+    revision: number | null = 0;
+
+    @DeleteDateColumn({ default: null })
+    readonly deletedAt: Date | null = null;
+  }
+  ```
+
+### 3.2 Revision Context
+
+- NotNeedRevisionTrail decorator is use to mark a controller methods it’s operation not need to be trace.
+  ```tsx
+  import { SetMetadata } from '@nestjs/common';
+
+  export const NOT_NEED_REVISION_TRAIL = 'not-need-revision-trail';
+
+  /**
+   * Decorator to mark routes as not need revision trail
+   */
+  export const NotNeedRevisionTrail = () =>
+    SetMetadata(NOT_NEED_REVISION_TRAIL, true);
+  ```
+- RevisionContextInterceptor is use to generate revision needs context fron the request info
+  ```tsx
+  import {
+    CallHandler,
+    ExecutionContext,
+    Injectable,
+    NestInterceptor,
+  } from '@nestjs/common';
+  import { Reflector } from '@nestjs/core';
+  import { createNamespace } from 'cls-hooked';
+  import { Request } from 'express';
+  import { NOT_NEED_REVISION_TRAIL } from '../decorators/not-need-revision-trail.decorator';
+
+  const revisionContext = createNamespace('revisionContext');
+
+  @Injectable()
+  export class RevisionContextInterceptor implements NestInterceptor {
+    constructor(private readonly reflector: Reflector) {}
+
+    intercept(context: ExecutionContext, next: CallHandler) {
+      const request: Request = context.switchToHttp().getRequest();
+      const user = request.user;
+
+      const notNeedRevisionTrail = this.reflector.getAllAndOverride<
+        boolean | undefined
+      >(NOT_NEED_REVISION_TRAIL, [context.getHandler(), context.getClass()]);
+
+      return revisionContext.runAndReturn(() => {
+        revisionContext.set(
+          'action',
+          `${request.method.toLowerCase()}${request.url
+            .split('?')[0]
+            .split('/')
+            .map((p) => p.split('-'))
+            .flat()
+            .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+            .join('')}`
+        );
+        if (user?.type && user?.id) {
+          revisionContext.set(`${user.type}Id`, user?.id ?? null);
+        }
+        revisionContext.set(
+          'notNeedRevisionTrail',
+          notNeedRevisionTrail ?? false
+        );
+
+        return next.handle();
+      });
+    }
+  }
+  ```
+
+### 3.3 Revision subscriber
+
+1. First, let create a subscriber
+
+   ```tsx
+   import { RevisionEntity } from '@grantit/common/entities/base.entity';
+   import { Injectable, Logger } from '@nestjs/common';
+   import {
+     DataSource,
+     EventSubscriber,
+     InsertEvent,
+     UpdateEvent,
+   } from 'typeorm';
+   import { EntitySubscriberInterface } from 'typeorm/subscriber/EntitySubscriberInterface';
+
+   /**
+    * This subscriber is responsible for creating a revision record and corresponding action record
+    * for every RevisionEntity and it's derived entities, when they are created or updated.
+    */
+   @Injectable()
+   @EventSubscriber()
+   export class RevisionSubscriber implements EntitySubscriberInterface {
+     private readonly logger = new Logger(RevisionSubscriber.name);
+     private readonly dataSource: DataSource;
+
+     constructor(dataSource: DataSource) {
+       dataSource.subscribers.push(this);
+       this.dataSource = dataSource;
+     }
+
+     listenTo() {
+       // Bind to all RevisionEntity and its derived entities.
+       return RevisionEntity;
+     }
+
+     async beforeInsert(event: InsertEvent<any>) {
+       this.logger.log('beforeInsert');
+       this.logger.log(event);
+     }
+
+     async afterInsert(event: InsertEvent<any>) {
+       this.logger.log('afterInsert');
+       this.logger.log(event);
+     }
+
+     async beforeUpdate(event: UpdateEvent<any>) {
+       this.logger.log('beforeUpdate');
+       this.logger.log(event);
+     }
+
+     async afterUpdate(event: UpdateEvent<any>) {
+       this.logger.log('afterUpdate');
+       this.logger.log(event);
+     }
+   }
+   ```
+
+2. Then bound it in some your app.module.ts or common.module.ts or something similar:
+
+   ```tsx
+     providers: [
+   		...
+       // Using cls-hooked to add the revision needed info,
+       // which will be used in the `RevisionSubscriber`, into the context.
+       { provide: APP_INTERCEPTOR, useClass: RevisionContextInterceptor },
+
+       // Provide the subscriber to listen to the `Revision` entity changes.
+       RevisionSubscriber,
+     ],
+   ```
+
+3. And don’t forgot to register the Entities:
+
+   ```tsx
+       TypeOrmModule.forRootAsync({
+         useFactory: (configService: ConfigService) => ({
+   	      ...
+           // Because we using these two entities in the `RevisionSubscriber`,
+           // we need to add them to the `entities` array manually.
+           entities: [Action, Revision],
+           // Otherwise, TypeORM will automatically load all entities
+           // which are registered in modules.
+           autoLoadEntities: true,
+         }),
+         inject: [ConfigService],
+       }),
+   ```
+
+Then, when u create or update database records in the DB, will see some logs we just added in the subscriber, in the console.
+
+Next, let’s finish the subscriber:
+
+```tsx
+import { Action } from '@grantit/common/entities/action.entity';
+import { RevisionEntity } from '@grantit/common/entities/base.entity';
+import { Revision } from '@grantit/common/entities/revision.entity';
+import { Injectable } from '@nestjs/common';
+import { getNamespace } from 'cls-hooked';
+import { cloneDeep, isEqual, omit } from 'lodash';
+import {
+  DataSource,
+  EventSubscriber,
+  InsertEvent,
+  SoftRemoveEvent,
+  UpdateEvent,
+} from 'typeorm';
+import { EntitySubscriberInterface } from 'typeorm/subscriber/EntitySubscriberInterface';
+
+export enum RevisionOperation {
+  CREATE = 'create',
+  UPDATE = 'update',
+}
+
+const revisionContext = getNamespace('revisionContext');
+
+/**
+ * This subscriber is responsible for creating a revision record and corresponding action record
+ * for every RevisionEntity and it's derived entities, when they are created or updated.
+ */
+@Injectable()
+@EventSubscriber()
+export class RevisionSubscriber implements EntitySubscriberInterface {
+  private readonly dataSource: DataSource;
+
+  constructor(dataSource: DataSource) {
+    dataSource.subscribers.push(this);
+    this.dataSource = dataSource;
+  }
+
+  listenTo() {
+    // Bind to all RevisionEntity and its derived entities.
+    return RevisionEntity;
+  }
+
+  /**
+   * Get the changed data between the new entity and the database entity,
+   * mostly for update operation, create operation will return all fields(except id, createdAt, updatedAt, revision)
+   */
+  private getDocumentData(
+    entity: any,
+    operation: RevisionOperation,
+    databaseEntity?: any
+  ) {
+    const excludeKeys = ['id', 'createdAt', 'updatedAt', 'revision'];
+
+    if (operation === RevisionOperation.CREATE) {
+      return omit(cloneDeep(entity), excludeKeys);
+    }
+
+    // operation === RevisionOperation.UPDATE
+    const changes = {};
+    for (const key in omit(cloneDeep(entity), excludeKeys)) {
+      if (
+        entity[key] !== undefined &&
+        entity[key] !== null &&
+        // isEqual can ignore same time but different Date instance, consider it as same value
+        !isEqual(entity[key], databaseEntity[key])
+      ) {
+        changes[key] = entity[key];
+      }
+    }
+    return changes;
+  }
+
+  private async createRevisionRecord(
+    operation: RevisionOperation,
+    event: UpdateEvent<any> | InsertEvent<any> | SoftRemoveEvent<any>
+  ) {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    const entity = event.entity;
+    const databaseEntity = (event as UpdateEvent<any>)?.databaseEntity ?? {};
+
+    try {
+      const action = new Action();
+      action.action = revisionContext.get('action');
+      action.userId = revisionContext.get('userId');
+      action.adminId = revisionContext.get('adminId');
+
+      await queryRunner.manager.save(Action, action);
+
+      const revision = new Revision();
+      revision.model = event.metadata.tableName;
+      revision.document = this.getDocumentData(
+        entity,
+        operation,
+        databaseEntity
+      );
+      revision.operation = operation;
+      revision.documentId = entity?.id ?? entity?.key;
+      revision.revision = entity.revision ?? 0;
+      revision.modifiedByUserId = revisionContext.get('userId');
+      revision.modifiedByAdminId = revisionContext.get('adminId');
+      revision.actionId = action.id;
+
+      await queryRunner.manager.save(Revision, revision);
+
+      await queryRunner.commitTransaction();
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async beforeInsert(event: InsertEvent<any>) {
+    if (revisionContext.get('notNeedRevisionTrail')) {
+      return;
+    }
+    if (event?.entity?.revision !== undefined) {
+      event.entity.revision = 1;
+    }
+  }
+
+  async afterInsert(event: InsertEvent<any>) {
+    if (revisionContext.get('notNeedRevisionTrail')) {
+      return;
+    }
+    this.createRevisionRecord(RevisionOperation.CREATE, event);
+  }
+
+  async beforeUpdate(event: UpdateEvent<any>) {
+    if (revisionContext.get('notNeedRevisionTrail')) {
+      return;
+    }
+    if (event?.entity?.revision !== undefined) {
+      event.entity.revision++;
+    }
+  }
+
+  async afterUpdate(event: UpdateEvent<any>) {
+    if (revisionContext.get('notNeedRevisionTrail')) {
+      return;
+    }
+    this.createRevisionRecord(RevisionOperation.UPDATE, event);
+  }
+
+  // TODO: Implement soft delete revision record here.
+}
+```
+
+Through the above implementation, we have successfully re-implemented the sequelize-paper-trail-like functionality in NestJS and TypeORM, maintaining the same data structure and business logic as the original system.
