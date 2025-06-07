@@ -3,7 +3,7 @@ import SocialMedia from '../types/SocialMedia'; // Do not use "@" here, it will 
 
 const config: Config = {
   siteMeta: {
-    title: `Brachistochrone - Jason Lam's personal website`,
+    title: `Brachistochrone`,
     authors: [{ name: 'Jason Lam', url: '/about/JasonLamv-t' }],
     description: "Jason Lam's personal website, a place to share my thoughts and experiences.",
     locale: 'zh-CN',
